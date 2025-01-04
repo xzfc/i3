@@ -18,6 +18,7 @@
 │ util-xrm⁴    │ 1.0.0  │ 1.0.0  │ https://github.com/Airblader/xcb-util-xrm/                  │
 │ libev        │ 4.0    │ 4.19   │ http://libev.schmorp.de/                                    │
 │ yajl         │ 2.0.1  │ 2.1.0  │ https://lloyd.github.com/yajl/                              │
+│ json-c       │ 0.15   │ 0.18   │ https://github.com/json-c/json-c                            │
 │ asciidoc     │ 8.3.0  │ 8.6.9  │ http://www.methods.co.nz/asciidoc/                          │
 │ xmlto        │ 0.0.23 │ 0.0.23 │ http://www.methods.co.nz/asciidoc/                          │
 │ Pod::Simple² │ 3.22   │ 3.22   │ http://search.cpan.org/dist/Pod-Simple/                     │
