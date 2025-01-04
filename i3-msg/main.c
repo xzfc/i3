@@ -26,7 +26,8 @@
 #include <string.h>
 #include <unistd.h>
 
-#include <yajl/yajl_parse.h>
+#include <json-c/json_object.h>
+#include <json-c/json_tokener.h>
 
 /*
  * Having verboselog() and errorlog() is necessary when using libi3.
@@ -48,105 +49,6 @@ void errorlog(char *fmt, ...) {
     va_end(args);
 }
 
-static char *last_key = NULL;
-
-typedef struct reply_t {
-    bool success;
-    char *error;
-    char *input;
-    char *errorposition;
-} reply_t;
-
-static int exit_code = 0;
-static reply_t last_reply;
-
-static int reply_boolean_cb(void *params, int val) {
-    if (strcmp(last_key, "success") == 0) {
-        last_reply.success = val;
-    }
-    return 1;
-}
-
-static int reply_string_cb(void *params, const unsigned char *val, size_t len) {
-    char *str = sstrndup((const char *)val, len);
-
-    if (strcmp(last_key, "error") == 0) {
-        last_reply.error = str;
-    } else if (strcmp(last_key, "input") == 0) {
-        last_reply.input = str;
-    } else if (strcmp(last_key, "errorposition") == 0) {
-        last_reply.errorposition = str;
-    } else {
-        free(str);
-    }
-    return 1;
-}
-
-static int reply_start_map_cb(void *params) {
-    return 1;
-}
-
-static int reply_end_map_cb(void *params) {
-    if (!last_reply.success) {
-        if (last_reply.input) {
-            fprintf(stderr, "ERROR: Your command: %s\n", last_reply.input);
-            fprintf(stderr, "ERROR:               %s\n", last_reply.errorposition);
-        }
-        fprintf(stderr, "ERROR: %s\n", last_reply.error);
-        exit_code = 2;
-    }
-    return 1;
-}
-
-static int reply_map_key_cb(void *params, const unsigned char *keyVal, size_t keyLen) {
-    free(last_key);
-    last_key = sstrndup((const char *)keyVal, keyLen);
-    return 1;
-}
-
-static yajl_callbacks reply_callbacks = {
-    .yajl_boolean = reply_boolean_cb,
-    .yajl_string = reply_string_cb,
-    .yajl_start_map = reply_start_map_cb,
-    .yajl_map_key = reply_map_key_cb,
-    .yajl_end_map = reply_end_map_cb,
-};
-
-/*******************************************************************************
- * Config reply callbacks
- *******************************************************************************/
-
-static char *config_last_key = NULL;
-
-static int config_string_cb(void *params, const unsigned char *val, size_t len) {
-    char *str = sstrndup((const char *)val, len);
-    if (strcmp(config_last_key, "config") == 0) {
-        fprintf(stdout, "%s", str);
-    }
-    free(str);
-    return 1;
-}
-
-static int config_start_map_cb(void *params) {
-    return 1;
-}
-
-static int config_end_map_cb(void *params) {
-    return 1;
-}
-
-static int config_map_key_cb(void *params, const unsigned char *keyVal, size_t keyLen) {
-    config_last_key = sstrndup((const char *)keyVal, keyLen);
-    return 1;
-}
-
-static yajl_callbacks config_callbacks = {
-    .yajl_string = config_string_cb,
-    .yajl_start_map = config_start_map_cb,
-    .yajl_map_key = config_map_key_cb,
-    .yajl_end_map = config_end_map_cb,
-};
-
 int main(int argc, char *argv[]) {
     char *socket_path = NULL;
     int o, option_index = 0;
@@ -155,6 +57,7 @@ int main(int argc, char *argv[]) {
     bool quiet = false;
     bool monitor = false;
     bool raw_reply = false;
+    int exit_code = 0;
 
     static struct option long_options[] = {
         {"socket", required_argument, 0, 's'},
@@ -269,17 +172,28 @@ int main(int argc, char *argv[]) {
      * If not, nicely format the error message. */
     if (reply_type == I3_IPC_REPLY_TYPE_COMMAND) {
         if (!raw_reply) {
-            yajl_handle handle = yajl_alloc(&reply_callbacks, NULL, NULL);
-            yajl_status state = yajl_parse(handle, (const unsigned char *)reply, reply_length);
-            yajl_free(handle);
-
-            switch (state) {
-                case yajl_status_ok:
-                    break;
-                case yajl_status_client_canceled:
-                case yajl_status_error:
-                    errx(EXIT_FAILURE, "IPC: Could not parse JSON reply.");
+            json_object *obj = json_parse(reply, reply_length);
+            if (obj == NULL) {
+                errx(EXIT_FAILURE, "IPC: Could not parse JSON reply.");
             }
+            json_object *item;
+            for (size_t i = 0; (item = json_object_array_get_idx(obj, i)) != NULL; i++) {
+                bool success = json_object_get_boolean(json_object_object_get(item, "success"));
+                if (!success) {
+                    json_object *input, *errorposition, *error;
+                    if (json_object_object_get_ex(item, "input", &input)) {
+                        fprintf(stderr, "ERROR: Your command: %s\n", json_object_get_string(input));
+                        if (json_object_object_get_ex(item, "errorposition", &errorposition)) {
+                            fprintf(stderr, "ERROR:               %s\n", json_object_get_string(errorposition));
+                        }
+                    }
+                    if (json_object_object_get_ex(item, "error", &error)) {
+                        fprintf(stderr, "ERROR: %s\n", json_object_get_string(error));
+                    }
+                    exit_code = 2;
+                }
+            }
+            json_object_put(obj);
         }
 
         if (!quiet || raw_reply) {
@@ -289,17 +203,16 @@ int main(int argc, char *argv[]) {
         if (raw_reply) {
             printf("%.*s\n", reply_length, reply);
         } else {
-            yajl_handle handle = yajl_alloc(&config_callbacks, NULL, NULL);
-            yajl_status state = yajl_parse(handle, (const unsigned char *)reply, reply_length);
-            yajl_free(handle);
-
-            switch (state) {
-                case yajl_status_ok:
-                    break;
-                case yajl_status_client_canceled:
-                case yajl_status_error:
-                    errx(EXIT_FAILURE, "IPC: Could not parse JSON reply.");
+            json_object *obj = json_parse(reply, reply_length);
+            if (obj == NULL) {
+                errx(EXIT_FAILURE, "IPC: Could not parse JSON reply.");
             }
+            json_object *config;
+            if (json_object_object_get_ex(obj, "config", &config)) {
+                const char *config_string = json_object_get_string(config);
+                printf("%s", config_string);
+            }
+            json_object_put(obj);
         }
     } else if (reply_type == I3_IPC_REPLY_TYPE_SUBSCRIBE) {
         do {
