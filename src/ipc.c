@@ -258,6 +258,12 @@ IPC_HANDLER(run_command) {
     yajl_gen_free(gen);
 }
 
+static json_object *dump_success(bool success) {
+    json_object *obj = json_object_new_object();
+    json_object_object_add(obj, "success", json_object_new_boolean(success));
+    return obj;
+}
+
 static void dump_rect_yajl(yajl_gen gen, const char *name, Rect r) {
     ystr(name);
     y(map_open);
@@ -1287,14 +1293,12 @@ IPC_HANDLER(subscribe) {
         ELOG("YAJL parse error: %s\n", err);
         yajl_free_error(p, err);
 
-        const char *reply = "{\"success\":false}";
-        ipc_send_client_message_raw(client, strlen(reply), I3_IPC_REPLY_TYPE_SUBSCRIBE, (const uint8_t *)reply);
+        ipc_send_client_message(client, I3_IPC_REPLY_TYPE_SUBSCRIBE, dump_success(false));
         yajl_free(p);
         return;
     }
     yajl_free(p);
-    const char *reply = "{\"success\":true}";
-    ipc_send_client_message_raw(client, strlen(reply), I3_IPC_REPLY_TYPE_SUBSCRIBE, (const uint8_t *)reply);
+    ipc_send_client_message(client, I3_IPC_REPLY_TYPE_SUBSCRIBE, dump_success(true));
 
     if (client->first_tick_sent) {
         return;
@@ -1376,8 +1380,7 @@ IPC_HANDLER(send_tick) {
     ipc_send_event_raw("tick", I3_IPC_EVENT_TICK, (const char *)payload, length);
     y(free);
 
-    const char *reply = "{\"success\":true}";
-    ipc_send_client_message_raw(client, strlen(reply), I3_IPC_REPLY_TYPE_TICK, (const uint8_t *)reply);
+    ipc_send_client_message(client, I3_IPC_REPLY_TYPE_TICK, dump_success(true));
     DLOG("Sent tick event\n");
 }
 
@@ -1427,8 +1430,7 @@ IPC_HANDLER(sync) {
         ELOG("YAJL parse error: %s\n", err);
         yajl_free_error(p, err);
 
-        const char *reply = "{\"success\":false}";
-        ipc_send_client_message_raw(client, strlen(reply), I3_IPC_REPLY_TYPE_SYNC, (const uint8_t *)reply);
+        ipc_send_client_message(client, I3_IPC_REPLY_TYPE_SYNC, dump_success(false));
         yajl_free(p);
         return;
     }
@@ -1436,8 +1438,7 @@ IPC_HANDLER(sync) {
 
     DLOG("received IPC sync request (rnd = %d, window = 0x%08x)\n", state.rnd, state.window);
     sync_respond(state.window, state.rnd);
-    const char *reply = "{\"success\":true}";
-    ipc_send_client_message_raw(client, strlen(reply), I3_IPC_REPLY_TYPE_SYNC, (const uint8_t *)reply);
+    ipc_send_client_message(client, I3_IPC_REPLY_TYPE_SYNC, dump_success(true));
 }
 
 IPC_HANDLER(get_binding_state) {
@@ -1769,9 +1770,6 @@ void ipc_send_binding_event(const char *event_type, Binding *bind, const char *m
  */
 void ipc_confirm_restart(ipc_client *client) {
     DLOG("ipc_confirm_restart(fd %d)\n", client->fd);
-    static const char *reply = "[{\"success\":true}]";
-    ipc_send_client_message_raw(
-        client, strlen(reply), I3_IPC_REPLY_TYPE_COMMAND,
-        (const uint8_t *)reply);
+    ipc_send_client_message(client, I3_IPC_REPLY_TYPE_COMMAND, dump_success(true));
     ipc_push_pending(client);
 }
