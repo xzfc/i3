@@ -959,8 +959,7 @@ IPC_HANDLER(tree) {
  *
  */
 IPC_HANDLER(get_workspaces) {
-    yajl_gen gen = ygenalloc();
-    y(array_open);
+    json_object *obj = json_object_new_array();
 
     Con *focused_ws = con_get_workspace(focused);
 
@@ -972,53 +971,22 @@ IPC_HANDLER(get_workspaces) {
         Con *ws;
         TAILQ_FOREACH (ws, &(output_get_content(output)->nodes_head), nodes) {
             assert(ws->type == CT_WORKSPACE);
-            y(map_open);
 
-            ystr("id");
-            y(integer, (uintptr_t)ws);
+            json_object *ws_obj = json_object_new_object();
+            json_object_array_add(obj, ws_obj);
 
-            ystr("num");
-            y(integer, ws->num);
-
-            ystr("name");
-            ystr(ws->name);
-
-            ystr("visible");
-            y(bool, workspace_is_visible(ws));
-
-            ystr("focused");
-            y(bool, ws == focused_ws);
-
-            ystr("rect");
-            y(map_open);
-            ystr("x");
-            y(integer, ws->rect.x);
-            ystr("y");
-            y(integer, ws->rect.y);
-            ystr("width");
-            y(integer, ws->rect.width);
-            ystr("height");
-            y(integer, ws->rect.height);
-            y(map_close);
-
-            ystr("output");
-            ystr(output->name);
-
-            ystr("urgent");
-            y(bool, ws->urgent);
-
-            y(map_close);
+            json_object_object_add(ws_obj, "id", json_object_new_int64((uintptr_t)ws));
+            json_object_object_add(ws_obj, "num", json_object_new_int64(ws->num));
+            json_object_object_add(ws_obj, "name", json_object_new_string(ws->name));
+            json_object_object_add(ws_obj, "visible", json_object_new_boolean(workspace_is_visible(ws)));
+            json_object_object_add(ws_obj, "focused", json_object_new_boolean(ws == focused_ws));
+            json_object_object_add(ws_obj, "rect", dump_rect(ws->rect));
+            json_object_object_add(ws_obj, "output", json_object_new_string(output->name));
+            json_object_object_add(ws_obj, "urgent", json_object_new_boolean(ws->urgent));
         }
     }
 
-    y(array_close);
-
-    const unsigned char *payload;
-    ylength length;
-    y(get_buf, &payload, &length);
-
-    ipc_send_client_message_raw(client, length, I3_IPC_REPLY_TYPE_WORKSPACES, payload);
-    y(free);
+    ipc_send_client_message(client, I3_IPC_REPLY_TYPE_WORKSPACES, obj);
 }
 
 /*
