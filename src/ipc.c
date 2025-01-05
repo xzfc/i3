@@ -253,20 +253,6 @@ static json_object *dump_success(bool success) {
     return obj;
 }
 
-static void dump_rect_yajl(yajl_gen gen, const char *name, Rect r) {
-    ystr(name);
-    y(map_open);
-    ystr("x");
-    y(integer, (int32_t)r.x);
-    ystr("y");
-    y(integer, (int32_t)r.y);
-    ystr("width");
-    y(integer, r.width);
-    ystr("height");
-    y(integer, r.height);
-    y(map_close);
-}
-
 static json_object *dump_rect(Rect r) {
     json_object *obj = json_object_new_object();
     json_object_object_add(obj, "x", json_object_new_int64(r.x));
