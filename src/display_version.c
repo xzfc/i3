@@ -14,41 +14,7 @@
 #include <time.h>
 #include <unistd.h>
 
-static bool human_readable_key;
-static bool loaded_config_file_name_key;
-static bool included_config_file_names;
-
-static char *human_readable_version;
-static char *loaded_config_file_name;
-
-static int version_string(void *ctx, const unsigned char *val, size_t len) {
-    if (human_readable_key) {
-        sasprintf(&human_readable_version, "%.*s", (int)len, val);
-    }
-    if (loaded_config_file_name_key) {
-        sasprintf(&loaded_config_file_name, "%.*s", (int)len, val);
-    }
-    if (included_config_file_names) {
-        IncludedFile *file = scalloc(1, sizeof(IncludedFile));
-        sasprintf(&(file->path), "%.*s", (int)len, val);
-        TAILQ_INSERT_TAIL(&included_files, file, files);
-    }
-    return 1;
-}
-
-static int version_map_key(void *ctx, const unsigned char *stringval, size_t stringlen) {
-#define KEY_MATCHES(x) (stringlen == strlen(x) && strncmp((const char *)stringval, x, strlen(x)) == 0)
-    human_readable_key = KEY_MATCHES("human_readable");
-    loaded_config_file_name_key = KEY_MATCHES("loaded_config_file_name");
-    included_config_file_names = KEY_MATCHES("included_config_file_names");
-#undef KEY_MATCHES
-    return 1;
-}
-
-static yajl_callbacks version_callbacks = {
-    .yajl_string = version_string,
-    .yajl_map_key = version_map_key,
-};
+#include <json-c/json_object.h>
 
 static void print_config_path(const char *path, const char *role) {
     struct stat sb;
@@ -119,22 +85,28 @@ void display_running_version(void) {
         errx(EXIT_FAILURE, "Got reply type %d, but expected %d (GET_VERSION)", reply_type, I3_IPC_MESSAGE_TYPE_GET_VERSION);
     }
 
-    yajl_handle handle = yajl_alloc(&version_callbacks, NULL, NULL);
-
-    yajl_status state = yajl_parse(handle, (const unsigned char *)reply, (int)reply_length);
-    if (state != yajl_status_ok) {
+    json_object *obj = json_parse(reply, reply_length), *obj_field;
+    if (!obj) {
         errx(EXIT_FAILURE, "Could not parse my own reply. That's weird. reply is %.*s", (int)reply_length, reply);
     }
+
+    const char *human_readable_version =
+        json_object_object_get_ex(obj, "human_readable", &obj_field)
+            ? json_object_get_string(obj_field)
+            : NULL;
 
     printf("\r\x1b[K");
     printf("Running i3 version: %s (pid %s)\n", human_readable_version, pid_from_atom);
 
-    if (loaded_config_file_name) {
+    if (json_object_object_get_ex(obj, "loaded_config_file_name", &obj_field)) {
         printf("Loaded i3 config:\n");
-        print_config_path(loaded_config_file_name, "main");
-        IncludedFile *file;
-        TAILQ_FOREACH (file, &included_files, files) {
-            print_config_path(file->path, "included");
+        print_config_path(json_object_get_string(obj_field), "main");
+
+        if (json_object_object_get_ex(obj, "included_config_file_names", &obj_field)) {
+            for (size_t i = 0; i < json_object_array_length(obj_field); i++) {
+                print_config_path(json_object_get_string(json_object_array_get_idx(obj_field, i)),
+                                  "included");
+            }
         }
     }
 
@@ -201,7 +173,7 @@ void display_running_version(void) {
     free(destpath);
 #endif
 
-    yajl_free(handle);
+    json_object_put(obj);
     free(reply);
     free(pid_from_atom);
 }
