@@ -258,7 +258,7 @@ IPC_HANDLER(run_command) {
     yajl_gen_free(gen);
 }
 
-static void dump_rect(yajl_gen gen, const char *name, Rect r) {
+static void dump_rect_yajl(yajl_gen gen, const char *name, Rect r) {
     ystr(name);
     y(map_open);
     ystr("x");
@@ -270,6 +270,15 @@ static void dump_rect(yajl_gen gen, const char *name, Rect r) {
     ystr("height");
     y(integer, r.height);
     y(map_close);
+}
+
+static json_object *dump_rect(Rect r) {
+    json_object *obj = json_object_new_object();
+    json_object_object_add(obj, "x", json_object_new_int64(r.x));
+    json_object_object_add(obj, "y", json_object_new_int64(r.y));
+    json_object_object_add(obj, "width", json_object_new_int64(r.width));
+    json_object_object_add(obj, "height", json_object_new_int64(r.height));
+    return obj;
 }
 
 static void dump_gaps(yajl_gen gen, const char *name, gaps_t gaps) {
@@ -532,18 +541,18 @@ void dump_node(yajl_gen gen, struct Con *con, bool inplace_restart) {
     ystr("current_border_width");
     y(integer, con->current_border_width);
 
-    dump_rect(gen, "rect", con->rect);
+    dump_rect_yajl(gen, "rect", con->rect);
     if (con_draw_decoration_into_frame(con)) {
         Rect simulated_deco_rect = con->deco_rect;
         simulated_deco_rect.x = con->rect.x - con->parent->rect.x;
         simulated_deco_rect.y = con->rect.y - con->parent->rect.y;
-        dump_rect(gen, "deco_rect", simulated_deco_rect);
-        dump_rect(gen, "actual_deco_rect", con->deco_rect);
+        dump_rect_yajl(gen, "deco_rect", simulated_deco_rect);
+        dump_rect_yajl(gen, "actual_deco_rect", con->deco_rect);
     } else {
-        dump_rect(gen, "deco_rect", con->deco_rect);
+        dump_rect_yajl(gen, "deco_rect", con->deco_rect);
     }
-    dump_rect(gen, "window_rect", con->window_rect);
-    dump_rect(gen, "geometry", con->geometry);
+    dump_rect_yajl(gen, "window_rect", con->window_rect);
+    dump_rect_yajl(gen, "geometry", con->geometry);
 
     ystr("name");
     if (con->window && con->window->name) {
@@ -872,7 +881,7 @@ static void dump_bar_config(yajl_gen gen, Barconfig *config) {
         y(integer, config->bar_height);
     }
 
-    dump_rect(gen, "padding", config->padding);
+    dump_rect_yajl(gen, "padding", config->padding);
 
     if (config->separator_symbol) {
         ystr("separator_symbol");
