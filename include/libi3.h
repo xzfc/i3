@@ -481,6 +481,12 @@ xcb_visualtype_t *get_visualtype(xcb_screen_t *screen);
 bool is_debug_build(void) __attribute__((const));
 
 /**
+ * Parse a JSON string.
+ *
+ */
+struct json_object *json_parse(const uint8_t *data, size_t len);
+
+/**
  * Returns the name of a temporary file with the specified prefix.
  *
  */
