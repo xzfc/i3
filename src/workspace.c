@@ -9,7 +9,6 @@
  *
  */
 #include "all.h"
-#include "yajl_utils.h"
 
 /*
  * Stores a copy of the name of the last used workspace for the workspace
@@ -531,15 +530,10 @@ void workspace_show(Con *workspace) {
         /* check if this workspace is currently visible */
         if (!workspace_is_visible(old)) {
             LOG("Closing old workspace (%p / %s), it is empty\n", old, old->name);
-            yajl_gen gen = ipc_marshal_workspace_event("empty", old, NULL);
+            json_object *obj = ipc_marshal_workspace_event("empty", old, NULL);
             tree_close_internal(old, DONT_KILL_WINDOW, false);
 
-            const unsigned char *payload;
-            ylength length;
-            y(get_buf, &payload, &length);
-            ipc_send_event_raw("workspace", I3_IPC_EVENT_WORKSPACE, (const char *)payload, length);
-
-            y(free);
+            ipc_send_event("workspace", I3_IPC_EVENT_WORKSPACE, obj);
 
             /* Avoid calling output_push_sticky_windows later with a freed container. */
             if (old == old_focus) {

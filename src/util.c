@@ -218,15 +218,13 @@ static char **add_argument(char **original, char *opt_char, char *opt_arg, char 
 
 static char *store_restart_layout(void) {
     setlocale(LC_NUMERIC, "C");
-    yajl_gen gen = yajl_gen_alloc(NULL);
 
-    dump_node(gen, croot, true);
+    json_object *obj = dump_node(croot, true);
 
     setlocale(LC_NUMERIC, "");
 
-    const unsigned char *payload;
     size_t length;
-    y(get_buf, &payload, &length);
+    const char *payload = json_object_to_json_string_length(obj, JSON_C_TO_STRING_PLAIN, &length);
 
     /* create a temporary file if one hasn't been specified, or just
      * resolve the tildes in the specified path */
@@ -270,7 +268,7 @@ static char *store_restart_layout(void) {
         DLOG("layout: %.*s\n", (int)length, payload);
     }
 
-    y(free);
+    json_object_put(obj);
 
     return filename;
 }

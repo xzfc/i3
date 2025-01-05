@@ -276,26 +276,20 @@ static json_object *dump_rect(Rect r) {
     return obj;
 }
 
-static void dump_gaps(yajl_gen gen, const char *name, gaps_t gaps) {
-    ystr(name);
-    y(map_open);
-    ystr("inner");
-    y(integer, gaps.inner);
+static json_object *dump_gaps(gaps_t gaps) {
+    json_object *obj = json_object_new_object();
+    json_object_object_add(obj, "inner", json_object_new_int64(gaps.inner));
 
     // TODO: the i3ipc Python modules recognize gaps, but only inner/outer
     // This is currently here to preserve compatibility with that
-    ystr("outer");
-    y(integer, gaps.top);
+    json_object_object_add(obj, "outer", json_object_new_int64(gaps.top));
 
-    ystr("top");
-    y(integer, gaps.top);
-    ystr("right");
-    y(integer, gaps.right);
-    ystr("bottom");
-    y(integer, gaps.bottom);
-    ystr("left");
-    y(integer, gaps.left);
-    y(map_close);
+    json_object_object_add(obj, "top", json_object_new_int64(gaps.top));
+    json_object_object_add(obj, "right", json_object_new_int64(gaps.right));
+    json_object_object_add(obj, "bottom", json_object_new_int64(gaps.bottom));
+    json_object_object_add(obj, "left", json_object_new_int64(gaps.left));
+
+    return obj;
 }
 
 static json_object *dump_event_state_mask(Binding *bind) {
@@ -380,120 +374,80 @@ static json_object *dump_binding(Binding *bind) {
     return obj;
 }
 
-void dump_node(yajl_gen gen, struct Con *con, bool inplace_restart) {
-    y(map_open);
-    ystr("id");
-    y(integer, (uintptr_t)con);
+json_object *dump_node(struct Con *con, bool inplace_restart) {
+    json_object *obj = json_object_new_object();
+    json_object_object_add(obj, "id", json_object_new_uint64((uintptr_t)con));
 
-    ystr("type");
-    switch (con->type) {
-        case CT_ROOT:
-            ystr("root");
-            break;
-        case CT_OUTPUT:
-            ystr("output");
-            break;
-        case CT_CON:
-            ystr("con");
-            break;
-        case CT_FLOATING_CON:
-            ystr("floating_con");
-            break;
-        case CT_WORKSPACE:
-            ystr("workspace");
-            break;
-        case CT_DOCKAREA:
-            ystr("dockarea");
-            break;
-    }
+    static const char *CON_TYPE_NAMES[] = {
+        [CT_ROOT] = "root",
+        [CT_OUTPUT] = "output",
+        [CT_CON] = "con",
+        [CT_FLOATING_CON] = "floating_con",
+        [CT_WORKSPACE] = "workspace",
+        [CT_DOCKAREA] = "dockarea",
+    };
+    json_object_object_add(obj, "type", json_object_new_string(CON_TYPE_NAMES[con->type]));
 
     /* provided for backwards compatibility only. */
-    ystr("orientation");
+    const char *orientation_name = NULL;
     if (!con_is_split(con)) {
-        ystr("none");
+        orientation_name = "none";
     } else {
         if (con_orientation(con) == HORIZ) {
-            ystr("horizontal");
+            orientation_name = "horizontal";
         } else {
-            ystr("vertical");
+            orientation_name = "vertical";
         }
     }
+    json_object_object_add(obj, "orientation", json_object_new_string(orientation_name));
 
-    ystr("scratchpad_state");
-    switch (con->scratchpad_state) {
-        case SCRATCHPAD_NONE:
-            ystr("none");
-            break;
-        case SCRATCHPAD_FRESH:
-            ystr("fresh");
-            break;
-        case SCRATCHPAD_CHANGED:
-            ystr("changed");
-            break;
-    }
+    static const char *SCRATCHPAD_STATE_NAMES[] = {
+        [SCRATCHPAD_NONE] = "none",
+        [SCRATCHPAD_FRESH] = "fresh",
+        [SCRATCHPAD_CHANGED] = "changed",
+    };
+    json_object_object_add(obj, "scratchpad_state",
+                           json_object_new_string(SCRATCHPAD_STATE_NAMES[con->scratchpad_state]));
 
-    ystr("percent");
-    if (con->percent == 0.0) {
-        y(null);
-    } else {
-        y(double, con->percent);
-    }
+    json_object_object_add(obj, "percent",
+                           con->percent == 0.0 ? NULL : json_object_new_double(con->percent));
 
-    ystr("urgent");
-    y(bool, con->urgent);
+    json_object_object_add(obj, "urgent", json_object_new_boolean(con->urgent));
 
-    ystr("marks");
-    y(array_open);
+    json_object *marks = json_object_new_array();
     mark_t *mark;
     TAILQ_FOREACH (mark, &(con->marks_head), marks) {
-        ystr(mark->name);
+        json_object_array_add(marks, json_object_new_string(mark->name));
     }
-    y(array_close);
+    json_object_object_add(obj, "marks", marks);
 
-    ystr("focused");
-    y(bool, (con == focused));
+    json_object_object_add(obj, "focused", json_object_new_boolean(con == focused));
 
     if (con->type != CT_ROOT && con->type != CT_OUTPUT) {
-        ystr("output");
-        ystr(con_get_output(con)->name);
+        json_object_object_add(obj, "output", json_object_new_string(con_get_output(con)->name));
     }
 
-    ystr("layout");
-    switch (con->layout) {
-        case L_DEFAULT:
-            DLOG("About to dump layout=default, this is a bug in the code.\n");
-            assert(false);
-            break;
-        case L_SPLITV:
-            ystr("splitv");
-            break;
-        case L_SPLITH:
-            ystr("splith");
-            break;
-        case L_STACKED:
-            ystr("stacked");
-            break;
-        case L_TABBED:
-            ystr("tabbed");
-            break;
-        case L_DOCKAREA:
-            ystr("dockarea");
-            break;
-        case L_OUTPUT:
-            ystr("output");
-            break;
+    if (con->layout == L_DEFAULT) {
+        DLOG("About to dump layout=default, this is a bug in the code.\n");
+        assert(false);
     }
+    static const char *LAYOUT_NAMES[] = {
+        [L_DEFAULT] = "default",
+        [L_STACKED] = "stacked",
+        [L_TABBED] = "tabbed",
+        [L_DOCKAREA] = "dockarea",
+        [L_OUTPUT] = "output",
+        [L_SPLITV] = "splitv",
+        [L_SPLITH] = "splith",
+    };
+    json_object_object_add(obj, "layout", json_object_new_string(LAYOUT_NAMES[con->layout]));
 
-    ystr("workspace_layout");
     switch (con->workspace_layout) {
         case L_DEFAULT:
-            ystr("default");
-            break;
         case L_STACKED:
-            ystr("stacked");
-            break;
         case L_TABBED:
-            ystr("tabbed");
+            json_object_object_add(obj, "workspace_layout",
+                                   json_object_new_string(LAYOUT_NAMES[con->workspace_layout]));
             break;
         default:
             DLOG("About to dump workspace_layout=%d (none of default/stacked/tabbed), this is a bug.\n", con->workspace_layout);
@@ -501,120 +455,101 @@ void dump_node(yajl_gen gen, struct Con *con, bool inplace_restart) {
             break;
     }
 
-    ystr("last_split_layout");
-    switch (con->layout) {
-        case L_SPLITV:
-            ystr("splitv");
-            break;
-        default:
-            ystr("splith");
-            break;
-    }
+    json_object_object_add(obj, "last_split_layout",
+                           json_object_new_string(LAYOUT_NAMES[con->layout]));
 
-    ystr("border");
-    switch (con->border_style) {
-        case BS_NORMAL:
-            ystr("normal");
-            break;
-        case BS_NONE:
-            ystr("none");
-            break;
-        case BS_PIXEL:
-            ystr("pixel");
-            break;
-    }
+    static const char *BORDER_STYLE_NAMES[] = {
+        [BS_NORMAL] = "normal",
+        [BS_NONE] = "none",
+        [BS_PIXEL] = "pixel",
+    };
+    json_object_object_add(obj, "border",
+                           json_object_new_string(BORDER_STYLE_NAMES[con->border_style]));
 
-    ystr("current_border_width");
-    y(integer, con->current_border_width);
+    json_object_object_add(obj, "current_border_width",
+                           json_object_new_int64(con->current_border_width));
 
-    dump_rect_yajl(gen, "rect", con->rect);
+    json_object_object_add(obj, "rect", dump_rect(con->rect));
     if (con_draw_decoration_into_frame(con)) {
         Rect simulated_deco_rect = con->deco_rect;
         simulated_deco_rect.x = con->rect.x - con->parent->rect.x;
         simulated_deco_rect.y = con->rect.y - con->parent->rect.y;
-        dump_rect_yajl(gen, "deco_rect", simulated_deco_rect);
-        dump_rect_yajl(gen, "actual_deco_rect", con->deco_rect);
+        json_object_object_add(obj, "deco_rect", dump_rect(simulated_deco_rect));
+        json_object_object_add(obj, "actual_deco_rect", dump_rect(con->deco_rect));
     } else {
-        dump_rect_yajl(gen, "deco_rect", con->deco_rect);
+        json_object_object_add(obj, "deco_rect", dump_rect(con->deco_rect));
     }
-    dump_rect_yajl(gen, "window_rect", con->window_rect);
-    dump_rect_yajl(gen, "geometry", con->geometry);
+    json_object_object_add(obj, "window_rect", dump_rect(con->window_rect));
+    json_object_object_add(obj, "geometry", dump_rect(con->geometry));
 
-    ystr("name");
     if (con->window && con->window->name) {
-        ystr(i3string_as_utf8(con->window->name));
+        json_object_object_add(obj, "name",
+                               json_object_new_string(i3string_as_utf8(con->window->name)));
     } else if (con->name != NULL) {
-        ystr(con->name);
+        json_object_object_add(obj, "name", json_object_new_string(con->name));
     } else {
-        y(null);
+        json_object_object_add(obj, "name", NULL);
     }
 
     if (con->title_format != NULL) {
-        ystr("title_format");
-        ystr(con->title_format);
+        json_object_object_add(obj, "title_format", json_object_new_string(con->title_format));
     }
 
-    ystr("window_icon_padding");
-    y(integer, con->window_icon_padding);
+    json_object_object_add(obj, "window_icon_padding", json_object_new_int64(con->window_icon_padding));
 
     if (con->type == CT_WORKSPACE) {
-        ystr("num");
-        y(integer, con->num);
-
-        dump_gaps(gen, "gaps", con->gaps);
+        json_object_object_add(obj, "num", json_object_new_int64(con->num));
+        json_object_object_add(obj, "gaps", dump_gaps(con->gaps));
     }
 
-    ystr("window");
-    if (con->window) {
-        y(integer, con->window->id);
-    } else {
-        y(null);
-    }
+    json_object_object_add(obj, "window",
+                           con->window ? json_object_new_int64(con->window->id) : NULL);
 
-    ystr("window_type");
+    const char *window_type_name = NULL;
     if (con->window) {
         if (con->window->window_type == A__NET_WM_WINDOW_TYPE_NORMAL) {
-            ystr("normal");
+            window_type_name = "normal";
         } else if (con->window->window_type == A__NET_WM_WINDOW_TYPE_DOCK) {
-            ystr("dock");
+            window_type_name = "dock";
         } else if (con->window->window_type == A__NET_WM_WINDOW_TYPE_DIALOG) {
-            ystr("dialog");
+            window_type_name = "dialog";
         } else if (con->window->window_type == A__NET_WM_WINDOW_TYPE_UTILITY) {
-            ystr("utility");
+            window_type_name = "utility";
         } else if (con->window->window_type == A__NET_WM_WINDOW_TYPE_TOOLBAR) {
-            ystr("toolbar");
+            window_type_name = "toolbar";
         } else if (con->window->window_type == A__NET_WM_WINDOW_TYPE_SPLASH) {
-            ystr("splash");
+            window_type_name = "splash";
         } else if (con->window->window_type == A__NET_WM_WINDOW_TYPE_MENU) {
-            ystr("menu");
+            window_type_name = "menu";
         } else if (con->window->window_type == A__NET_WM_WINDOW_TYPE_DROPDOWN_MENU) {
-            ystr("dropdown_menu");
+            window_type_name = "dropdown_menu";
         } else if (con->window->window_type == A__NET_WM_WINDOW_TYPE_POPUP_MENU) {
-            ystr("popup_menu");
+            window_type_name = "popup_menu";
         } else if (con->window->window_type == A__NET_WM_WINDOW_TYPE_TOOLTIP) {
-            ystr("tooltip");
+            window_type_name = "tooltip";
         } else if (con->window->window_type == A__NET_WM_WINDOW_TYPE_NOTIFICATION) {
-            ystr("notification");
+            window_type_name = "notification";
         } else {
-            ystr("unknown");
+            window_type_name = "unknown";
         }
-    } else {
-        y(null);
     }
+    json_object_object_add(obj, "window_type",
+                           window_type_name ? json_object_new_string(window_type_name) : NULL);
 
     if (con->window && !inplace_restart) {
         /* Window properties are useless to preserve when restarting because
          * they will be queried again anyway. However, for i3-save-tree(1),
          * they are very useful and save i3-save-tree dealing with X11. */
-        ystr("window_properties");
-        y(map_open);
+        json_object *window_properties = json_object_new_object();
+        json_object_object_add(obj, "window_properties", window_properties);
 
-#define DUMP_PROPERTY(key, prop_name)         \
-    do {                                      \
-        if (con->window->prop_name != NULL) { \
-            ystr(key);                        \
-            ystr(con->window->prop_name);     \
-        }                                     \
+#define DUMP_PROPERTY(key, prop_name)                            \
+    do {                                                         \
+        if (con->window->prop_name != NULL) {                    \
+            json_object_object_add(                              \
+                window_properties, key,                          \
+                json_object_new_string(con->window->prop_name)); \
+        }                                                        \
     } while (0)
 
         DUMP_PROPERTY("class", class_class);
@@ -623,68 +558,54 @@ void dump_node(yajl_gen gen, struct Con *con, bool inplace_restart) {
         DUMP_PROPERTY("machine", machine);
 
         if (con->window->name != NULL) {
-            ystr("title");
-            ystr(i3string_as_utf8(con->window->name));
+            json_object_object_add(
+                window_properties, "title",
+                json_object_new_string(i3string_as_utf8(con->window->name)));
         }
 
-        ystr("transient_for");
         if (con->window->transient_for == XCB_NONE) {
-            y(null);
+            json_object_object_add(window_properties, "transient_for", NULL);
         } else {
-            y(integer, con->window->transient_for);
+            json_object_object_add(window_properties, "transient_for",
+                                   json_object_new_int64(con->window->transient_for));
         }
-
-        y(map_close);
     }
 
-    ystr("nodes");
-    y(array_open);
+    json_object *nodes = json_object_new_array();
+    json_object_object_add(obj, "nodes", nodes);
     Con *node;
     if (con->type != CT_DOCKAREA || !inplace_restart) {
         TAILQ_FOREACH (node, &(con->nodes_head), nodes) {
-            dump_node(gen, node, inplace_restart);
+            json_object_array_add(nodes, dump_node(node, inplace_restart));
         }
     }
-    y(array_close);
 
-    ystr("floating_nodes");
-    y(array_open);
+    json_object *floating_nodes = json_object_new_array();
+    json_object_object_add(obj, "floating_nodes", floating_nodes);
     TAILQ_FOREACH (node, &(con->floating_head), floating_windows) {
-        dump_node(gen, node, inplace_restart);
+        json_object_array_add(floating_nodes, dump_node(node, inplace_restart));
     }
-    y(array_close);
 
-    ystr("focus");
-    y(array_open);
+    json_object *focus = json_object_new_array();
+    json_object_object_add(obj, "focus", focus);
     TAILQ_FOREACH (node, &(con->focus_head), focused) {
-        y(integer, (uintptr_t)node);
-    }
-    y(array_close);
-
-    ystr("fullscreen_mode");
-    y(integer, con->fullscreen_mode);
-
-    ystr("sticky");
-    y(bool, con->sticky);
-
-    ystr("floating");
-    switch (con->floating) {
-        case FLOATING_AUTO_OFF:
-            ystr("auto_off");
-            break;
-        case FLOATING_AUTO_ON:
-            ystr("auto_on");
-            break;
-        case FLOATING_USER_OFF:
-            ystr("user_off");
-            break;
-        case FLOATING_USER_ON:
-            ystr("user_on");
-            break;
+        json_object_array_add(focus, json_object_new_uint64((uintptr_t)node));
     }
 
-    ystr("swallows");
-    y(array_open);
+    json_object_object_add(obj, "fullscreen_mode", json_object_new_int(con->fullscreen_mode));
+
+    json_object_object_add(obj, "sticky", json_object_new_boolean(con->sticky));
+
+    static const char *FLOATING_NAMES[] = {
+        [FLOATING_AUTO_OFF] = "auto_off",
+        [FLOATING_AUTO_ON] = "auto_on",
+        [FLOATING_USER_OFF] = "user_off",
+        [FLOATING_USER_ON] = "user_on",
+    };
+    json_object_object_add(obj, "floating", json_object_new_string(FLOATING_NAMES[con->floating]));
+
+    json_object *swallows = json_object_new_array();
+    json_object_object_add(obj, "swallows", swallows);
     Match *match;
     TAILQ_FOREACH (match, &(con->swallow_head), matches) {
         /* We will generate a new restart_mode match specification after this
@@ -692,20 +613,21 @@ void dump_node(yajl_gen gen, struct Con *con, bool inplace_restart) {
         if (match->restart_mode) {
             continue;
         }
-        y(map_open);
+        json_object *swallow = json_object_new_object();
+        json_object_array_add(swallows, swallow);
         if (match->dock != M_DONTCHECK) {
-            ystr("dock");
-            y(integer, match->dock);
-            ystr("insert_where");
-            y(integer, match->insert_where);
+            json_object_object_add(swallow, "dock", json_object_new_int(match->dock));
+            json_object_object_add(swallow, "insert_where",
+                                   json_object_new_int(match->insert_where));
         }
 
-#define DUMP_REGEX(re_name)                \
-    do {                                   \
-        if (match->re_name != NULL) {      \
-            ystr(#re_name);                \
-            ystr(match->re_name->pattern); \
-        }                                  \
+#define DUMP_REGEX(re_name)                                       \
+    do {                                                          \
+        if (match->re_name != NULL) {                             \
+            json_object_object_add(                               \
+                swallow, #re_name,                                \
+                json_object_new_string(match->re_name->pattern)); \
+        }                                                         \
     } while (0)
 
         DUMP_REGEX(class);
@@ -715,32 +637,26 @@ void dump_node(yajl_gen gen, struct Con *con, bool inplace_restart) {
         DUMP_REGEX(machine);
 
 #undef DUMP_REGEX
-        y(map_close);
     }
 
     if (inplace_restart) {
         if (con->window != NULL) {
-            y(map_open);
-            ystr("id");
-            y(integer, con->window->id);
-            ystr("restart_mode");
-            y(bool, true);
-            y(map_close);
+            json_object *swallow = json_object_new_object();
+            json_object_array_add(swallows, swallow);
+            json_object_object_add(swallow, "id", json_object_new_int64(con->window->id));
+            json_object_object_add(swallow, "restart_mode", json_object_new_boolean(true));
         }
     }
-    y(array_close);
 
     if (inplace_restart && con->window != NULL) {
-        ystr("depth");
-        y(integer, con->depth);
+        json_object_object_add(obj, "depth", json_object_new_int(con->depth));
     }
 
     if (inplace_restart && con->type == CT_ROOT && previous_workspace_name) {
-        ystr("previous_workspace_name");
-        ystr(previous_workspace_name);
+        json_object_object_add(obj, "previous_workspace_name", json_object_new_string(previous_workspace_name));
     }
 
-    y(map_close);
+    return obj;
 }
 
 static json_object *dump_bar_bindings(Barconfig *config) {
@@ -909,17 +825,7 @@ static json_object *dump_bar_config(Barconfig *config) {
 }
 
 IPC_HANDLER(tree) {
-    setlocale(LC_NUMERIC, "C");
-    yajl_gen gen = ygenalloc();
-    dump_node(gen, croot, false);
-    setlocale(LC_NUMERIC, "");
-
-    const unsigned char *payload;
-    ylength length;
-    y(get_buf, &payload, &length);
-
-    ipc_send_client_message_raw(client, length, I3_IPC_REPLY_TYPE_TREE, payload);
-    y(free);
+    ipc_send_client_message(client, I3_IPC_REPLY_TYPE_TREE, dump_node(croot, false));
 }
 
 /*
@@ -1450,34 +1356,20 @@ ipc_client *ipc_new_client_on_fd(EV_P_ int fd) {
  * Generates a json workspace event. Returns a dynamically allocated yajl
  * generator. Free with yajl_gen_free().
  */
-yajl_gen ipc_marshal_workspace_event(const char *change, Con *current, Con *old) {
-    setlocale(LC_NUMERIC, "C");
-    yajl_gen gen = ygenalloc();
+json_object *ipc_marshal_workspace_event(const char *change, Con *current, Con *old) {
+    json_object *obj = json_object_new_object();
 
-    y(map_open);
+    json_object_object_add(obj, "change", json_object_new_string(change));
 
-    ystr("change");
-    ystr(change);
-
-    ystr("current");
-    if (current == NULL) {
-        y(null);
-    } else {
-        dump_node(gen, current, false);
+    if (current != NULL) {
+        json_object_object_add(obj, "current", dump_node(current, false));
     }
 
-    ystr("old");
-    if (old == NULL) {
-        y(null);
-    } else {
-        dump_node(gen, old, false);
+    if (old != NULL) {
+        json_object_object_add(obj, "old", dump_node(old, false));
     }
 
-    y(map_close);
-
-    setlocale(LC_NUMERIC, "");
-
-    return gen;
+    return obj;
 }
 
 /*
@@ -1486,15 +1378,8 @@ yajl_gen ipc_marshal_workspace_event(const char *change, Con *current, Con *old)
  * previously focused workspace in "old".
  */
 void ipc_send_workspace_event(const char *change, Con *current, Con *old) {
-    yajl_gen gen = ipc_marshal_workspace_event(change, current, old);
-
-    const unsigned char *payload;
-    ylength length;
-    y(get_buf, &payload, &length);
-
-    ipc_send_event_raw("workspace", I3_IPC_EVENT_WORKSPACE, (const char *)payload, length);
-
-    y(free);
+    ipc_send_event("workspace", I3_IPC_EVENT_WORKSPACE,
+                   ipc_marshal_workspace_event(change, current, old));
 }
 
 /*
@@ -1505,26 +1390,10 @@ void ipc_send_window_event(const char *property, Con *con) {
     DLOG("Issue IPC window %s event (con = %p, window = 0x%08x)\n",
          property, con, (con->window ? con->window->id : XCB_WINDOW_NONE));
 
-    setlocale(LC_NUMERIC, "C");
-    yajl_gen gen = ygenalloc();
-
-    y(map_open);
-
-    ystr("change");
-    ystr(property);
-
-    ystr("container");
-    dump_node(gen, con, false);
-
-    y(map_close);
-
-    const unsigned char *payload;
-    ylength length;
-    y(get_buf, &payload, &length);
-
-    ipc_send_event_raw("window", I3_IPC_EVENT_WINDOW, (const char *)payload, length);
-    y(free);
-    setlocale(LC_NUMERIC, "");
+    json_object *obj = json_object_new_object();
+    json_object_object_add(obj, "change", json_object_new_string(property));
+    json_object_object_add(obj, "container", dump_node(con, false));
+    ipc_send_event("window", I3_IPC_EVENT_WINDOW, obj);
 }
 
 /*

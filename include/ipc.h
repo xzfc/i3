@@ -113,13 +113,13 @@ typedef enum {
  */
 void ipc_shutdown(shutdown_reason_t reason, int exempt_fd);
 
-void dump_node(yajl_gen gen, Con *con, bool inplace_restart);
+json_object *dump_node(Con *con, bool inplace_restart);
 
 /**
  * Generates a json workspace event. Returns a dynamically allocated yajl
  * generator. Free with yajl_gen_free().
  */
-yajl_gen ipc_marshal_workspace_event(const char *change, Con *current, Con *old);
+json_object *ipc_marshal_workspace_event(const char *change, Con *current, Con *old);
 
 /**
  * For the workspace events we send, along with the usual "change" field, also
