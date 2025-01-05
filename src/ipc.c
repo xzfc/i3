@@ -995,53 +995,27 @@ IPC_HANDLER(get_workspaces) {
  *
  */
 IPC_HANDLER(get_outputs) {
-    yajl_gen gen = ygenalloc();
-    y(array_open);
+    json_object *obj = json_object_new_array();
 
     Output *output;
     TAILQ_FOREACH (output, &outputs, outputs) {
-        y(map_open);
+        json_object *elem = json_object_new_object();
+        json_object_array_add(obj, elem);
 
-        ystr("name");
-        ystr(output_primary_name(output));
+        json_object_object_add(elem, "name", json_object_new_string(output_primary_name(output)));
+        json_object_object_add(elem, "active", json_object_new_boolean(output->active));
+        json_object_object_add(elem, "primary", json_object_new_boolean(output->primary));
+        json_object_object_add(elem, "rect", dump_rect(output->rect));
 
-        ystr("active");
-        y(bool, output->active);
-
-        ystr("primary");
-        y(bool, output->primary);
-
-        ystr("rect");
-        y(map_open);
-        ystr("x");
-        y(integer, output->rect.x);
-        ystr("y");
-        y(integer, output->rect.y);
-        ystr("width");
-        y(integer, output->rect.width);
-        ystr("height");
-        y(integer, output->rect.height);
-        y(map_close);
-
-        ystr("current_workspace");
         Con *ws = NULL;
         if (output->con && (ws = con_get_fullscreen_con(output->con, CF_OUTPUT))) {
-            ystr(ws->name);
+            json_object_object_add(elem, "current_workspace", json_object_new_string(ws->name));
         } else {
-            y(null);
+            json_object_object_add(elem, "current_workspace", NULL);
         }
-
-        y(map_close);
     }
 
-    y(array_close);
-
-    const unsigned char *payload;
-    ylength length;
-    y(get_buf, &payload, &length);
-
-    ipc_send_client_message_raw(client, length, I3_IPC_REPLY_TYPE_OUTPUTS, payload);
-    y(free);
+    ipc_send_client_message(client, I3_IPC_REPLY_TYPE_OUTPUTS, obj);
 }
 
 /*
