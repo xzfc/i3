@@ -666,7 +666,7 @@ void switch_mode(const char *new_mode) {
         sasprintf(&event_msg, "{\"change\":\"%s\", \"pango_markup\":%s}",
                   mode->name, (mode->pango_markup ? "true" : "false"));
 
-        ipc_send_event("mode", I3_IPC_EVENT_MODE, event_msg);
+        ipc_send_event_raw("mode", I3_IPC_EVENT_MODE, event_msg, strlen(event_msg));
         FREE(event_msg);
 
         return;

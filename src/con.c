@@ -2231,7 +2231,7 @@ static void con_on_remove_child(Con *con) {
             const unsigned char *payload;
             ylength length;
             y(get_buf, &payload, &length);
-            ipc_send_event("workspace", I3_IPC_EVENT_WORKSPACE, (const char *)payload);
+            ipc_send_event_raw("workspace", I3_IPC_EVENT_WORKSPACE, (const char *)payload, length);
 
             y(free);
         }

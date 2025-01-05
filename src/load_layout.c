@@ -569,7 +569,7 @@ static int json_int(void *ctx, long long val) {
     return 1;
 }
 
-static int json_bool(void *ctx, int val) {
+static int json_boolean(void *ctx, int val) {
     LOG("bool %d for key %s\n", val, last_key);
     if (strcasecmp(last_key, "focused") == 0 && val) {
         to_focus = json_node;
@@ -688,7 +688,7 @@ json_content_t json_determine_content(const char *buf, const size_t len) {
 
 void tree_append_json(Con *con, const char *buf, const size_t len, char **errormsg) {
     static yajl_callbacks callbacks = {
-        .yajl_boolean = json_bool,
+        .yajl_boolean = json_boolean,
         .yajl_integer = json_int,
         .yajl_double = json_double,
         .yajl_string = json_string,

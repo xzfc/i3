@@ -473,7 +473,8 @@ static void handle_screen_change(xcb_generic_event_t *e) {
 
     scratchpad_fix_resolution();
 
-    ipc_send_event("output", I3_IPC_EVENT_OUTPUT, "{\"change\":\"unspecified\"}");
+    const char *payload = "{\"change\":\"unspecified\"}";
+    ipc_send_event_raw("output", I3_IPC_EVENT_OUTPUT, payload, strlen(payload));
 }
 
 /*
@@ -1196,7 +1197,8 @@ static void handle_configure_notify(xcb_configure_notify_event_t *event) {
     }
     randr_query_outputs();
 
-    ipc_send_event("output", I3_IPC_EVENT_OUTPUT, "{\"change\":\"unspecified\"}");
+    const char *payload = "{\"change\":\"unspecified\"}";
+    ipc_send_event_raw("output", I3_IPC_EVENT_OUTPUT, payload, strlen(payload));
 }
 
 /*

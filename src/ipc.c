@@ -22,6 +22,7 @@
 
 #include <yajl/yajl_gen.h>
 #include <yajl/yajl_parse.h>
+#include <json-c/json_object.h>
 
 char *current_socketpath = NULL;
 
@@ -95,7 +96,7 @@ static void ipc_push_pending(ipc_client *client) {
  * send the message if the client's buffer was empty.
  *
  */
-static void ipc_send_client_message(ipc_client *client, size_t size, const uint32_t message_type, const uint8_t *payload) {
+static void ipc_send_client_message_raw(ipc_client *client, size_t size, const uint32_t message_type, const uint8_t *payload) {
     const i3_ipc_header_t header = {
         .magic = {'i', '3', '-', 'i', 'p', 'c'},
         .size = size,
@@ -112,6 +113,18 @@ static void ipc_send_client_message(ipc_client *client, size_t size, const uint3
     if (push_now) {
         ipc_push_pending(client);
     }
+}
+
+/*
+ * Similar to ipc_send_client_message_raw, but takes a json_object and converts it to a string.
+ *
+ * Takes ownership of the json_object.
+ */
+static void ipc_send_client_message(ipc_client *client, const uint32_t message_type, json_object *obj) {
+    size_t size;
+    const char *payload = json_object_to_json_string_length(obj, JSON_C_TO_STRING_PLAIN, &size);
+    ipc_send_client_message_raw(client, size, message_type, (const uint8_t *)payload);
+    json_object_put(obj);
 }
 
 static void free_ipc_client(ipc_client *client, int exempt_fd) {
@@ -144,16 +157,29 @@ static void free_ipc_client(ipc_client *client, int exempt_fd) {
  * and subscribed to this kind of event.
  *
  */
-void ipc_send_event(const char *event, uint32_t message_type, const char *payload) {
+void ipc_send_event_raw(const char *event, uint32_t message_type, const char *payload, size_t size) {
     ipc_client *current;
     TAILQ_FOREACH (current, &all_clients, clients) {
         for (int i = 0; i < current->num_events; i++) {
             if (strcasecmp(current->events[i], event) == 0) {
-                ipc_send_client_message(current, strlen(payload), message_type, (uint8_t *)payload);
+                ipc_send_client_message_raw(current, size, message_type, (const uint8_t *)payload);
                 break;
             }
         }
     }
+}
+
+/*
+ * Sends the specified event to all IPC clients which are currently connected
+ * and subscribed to this kind of event.
+ *
+ * Takes ownership of the json_object.
+ */
+void ipc_send_event(const char *event, uint32_t message_type, json_object *obj) {
+    size_t size;
+    const char *payload = json_object_to_json_string_length(obj, JSON_C_TO_STRING_PLAIN, &size);
+    ipc_send_event_raw(event, message_type, payload, size);
+    json_object_put(obj);
 }
 
 /*
@@ -177,7 +203,7 @@ static void ipc_send_shutdown_event(shutdown_reason_t reason) {
     ylength length;
 
     y(get_buf, &payload, &length);
-    ipc_send_event("shutdown", I3_IPC_EVENT_SHUTDOWN, (const char *)payload);
+    ipc_send_event_raw("shutdown", I3_IPC_EVENT_SHUTDOWN, (const char *)payload, length);
 
     y(free);
 }
@@ -226,8 +252,8 @@ IPC_HANDLER(run_command) {
     ylength length;
     yajl_gen_get_buf(gen, &reply, &length);
 
-    ipc_send_client_message(client, length, I3_IPC_REPLY_TYPE_COMMAND,
-                            (const uint8_t *)reply);
+    ipc_send_client_message_raw(client, length, I3_IPC_REPLY_TYPE_COMMAND,
+                                (const uint8_t *)reply);
 
     yajl_gen_free(gen);
 }
@@ -919,7 +945,7 @@ IPC_HANDLER(tree) {
     ylength length;
     y(get_buf, &payload, &length);
 
-    ipc_send_client_message(client, length, I3_IPC_REPLY_TYPE_TREE, payload);
+    ipc_send_client_message_raw(client, length, I3_IPC_REPLY_TYPE_TREE, payload);
     y(free);
 }
 
@@ -987,7 +1013,7 @@ IPC_HANDLER(get_workspaces) {
     ylength length;
     y(get_buf, &payload, &length);
 
-    ipc_send_client_message(client, length, I3_IPC_REPLY_TYPE_WORKSPACES, payload);
+    ipc_send_client_message_raw(client, length, I3_IPC_REPLY_TYPE_WORKSPACES, payload);
     y(free);
 }
 
@@ -1042,7 +1068,7 @@ IPC_HANDLER(get_outputs) {
     ylength length;
     y(get_buf, &payload, &length);
 
-    ipc_send_client_message(client, length, I3_IPC_REPLY_TYPE_OUTPUTS, payload);
+    ipc_send_client_message_raw(client, length, I3_IPC_REPLY_TYPE_OUTPUTS, payload);
     y(free);
 }
 
@@ -1069,7 +1095,7 @@ IPC_HANDLER(get_marks) {
     ylength length;
     y(get_buf, &payload, &length);
 
-    ipc_send_client_message(client, length, I3_IPC_REPLY_TYPE_MARKS, payload);
+    ipc_send_client_message_raw(client, length, I3_IPC_REPLY_TYPE_MARKS, payload);
     y(free);
 }
 
@@ -1113,7 +1139,7 @@ IPC_HANDLER(get_version) {
     ylength length;
     y(get_buf, &payload, &length);
 
-    ipc_send_client_message(client, length, I3_IPC_REPLY_TYPE_VERSION, payload);
+    ipc_send_client_message_raw(client, length, I3_IPC_REPLY_TYPE_VERSION, payload);
     y(free);
 }
 
@@ -1138,7 +1164,7 @@ IPC_HANDLER(get_bar_config) {
         ylength length;
         y(get_buf, &payload, &length);
 
-        ipc_send_client_message(client, length, I3_IPC_REPLY_TYPE_BAR_CONFIG, payload);
+        ipc_send_client_message_raw(client, length, I3_IPC_REPLY_TYPE_BAR_CONFIG, payload);
         y(free);
         return;
     }
@@ -1176,7 +1202,7 @@ IPC_HANDLER(get_bar_config) {
     ylength length;
     y(get_buf, &payload, &length);
 
-    ipc_send_client_message(client, length, I3_IPC_REPLY_TYPE_BAR_CONFIG, payload);
+    ipc_send_client_message_raw(client, length, I3_IPC_REPLY_TYPE_BAR_CONFIG, payload);
     y(free);
 }
 
@@ -1198,7 +1224,7 @@ IPC_HANDLER(get_binding_modes) {
     ylength length;
     y(get_buf, &payload, &length);
 
-    ipc_send_client_message(client, length, I3_IPC_REPLY_TYPE_BINDING_MODES, payload);
+    ipc_send_client_message_raw(client, length, I3_IPC_REPLY_TYPE_BINDING_MODES, payload);
     y(free);
 }
 
@@ -1253,13 +1279,13 @@ IPC_HANDLER(subscribe) {
         yajl_free_error(p, err);
 
         const char *reply = "{\"success\":false}";
-        ipc_send_client_message(client, strlen(reply), I3_IPC_REPLY_TYPE_SUBSCRIBE, (const uint8_t *)reply);
+        ipc_send_client_message_raw(client, strlen(reply), I3_IPC_REPLY_TYPE_SUBSCRIBE, (const uint8_t *)reply);
         yajl_free(p);
         return;
     }
     yajl_free(p);
     const char *reply = "{\"success\":true}";
-    ipc_send_client_message(client, strlen(reply), I3_IPC_REPLY_TYPE_SUBSCRIBE, (const uint8_t *)reply);
+    ipc_send_client_message_raw(client, strlen(reply), I3_IPC_REPLY_TYPE_SUBSCRIBE, (const uint8_t *)reply);
 
     if (client->first_tick_sent) {
         return;
@@ -1278,7 +1304,7 @@ IPC_HANDLER(subscribe) {
 
     client->first_tick_sent = true;
     const char *payload = "{\"first\":true,\"payload\":\"\"}";
-    ipc_send_client_message(client, strlen(payload), I3_IPC_EVENT_TICK, (const uint8_t *)payload);
+    ipc_send_client_message_raw(client, strlen(payload), I3_IPC_EVENT_TICK, (const uint8_t *)payload);
 }
 
 /*
@@ -1313,7 +1339,7 @@ IPC_HANDLER(get_config) {
     ylength length;
     y(get_buf, &payload, &length);
 
-    ipc_send_client_message(client, length, I3_IPC_REPLY_TYPE_CONFIG, payload);
+    ipc_send_client_message_raw(client, length, I3_IPC_REPLY_TYPE_CONFIG, payload);
     y(free);
 }
 
@@ -1338,11 +1364,11 @@ IPC_HANDLER(send_tick) {
     ylength length;
     y(get_buf, &payload, &length);
 
-    ipc_send_event("tick", I3_IPC_EVENT_TICK, (const char *)payload);
+    ipc_send_event_raw("tick", I3_IPC_EVENT_TICK, (const char *)payload, length);
     y(free);
 
     const char *reply = "{\"success\":true}";
-    ipc_send_client_message(client, strlen(reply), I3_IPC_REPLY_TYPE_TICK, (const uint8_t *)reply);
+    ipc_send_client_message_raw(client, strlen(reply), I3_IPC_REPLY_TYPE_TICK, (const uint8_t *)reply);
     DLOG("Sent tick event\n");
 }
 
@@ -1393,7 +1419,7 @@ IPC_HANDLER(sync) {
         yajl_free_error(p, err);
 
         const char *reply = "{\"success\":false}";
-        ipc_send_client_message(client, strlen(reply), I3_IPC_REPLY_TYPE_SYNC, (const uint8_t *)reply);
+        ipc_send_client_message_raw(client, strlen(reply), I3_IPC_REPLY_TYPE_SYNC, (const uint8_t *)reply);
         yajl_free(p);
         return;
     }
@@ -1402,7 +1428,7 @@ IPC_HANDLER(sync) {
     DLOG("received IPC sync request (rnd = %d, window = 0x%08x)\n", state.rnd, state.window);
     sync_respond(state.window, state.rnd);
     const char *reply = "{\"success\":true}";
-    ipc_send_client_message(client, strlen(reply), I3_IPC_REPLY_TYPE_SYNC, (const uint8_t *)reply);
+    ipc_send_client_message_raw(client, strlen(reply), I3_IPC_REPLY_TYPE_SYNC, (const uint8_t *)reply);
 }
 
 IPC_HANDLER(get_binding_state) {
@@ -1419,7 +1445,7 @@ IPC_HANDLER(get_binding_state) {
     ylength length;
     y(get_buf, &payload, &length);
 
-    ipc_send_client_message(client, length, I3_IPC_REPLY_TYPE_GET_BINDING_STATE, payload);
+    ipc_send_client_message_raw(client, length, I3_IPC_REPLY_TYPE_GET_BINDING_STATE, payload);
     y(free);
 }
 
@@ -1638,7 +1664,7 @@ void ipc_send_workspace_event(const char *change, Con *current, Con *old) {
     ylength length;
     y(get_buf, &payload, &length);
 
-    ipc_send_event("workspace", I3_IPC_EVENT_WORKSPACE, (const char *)payload);
+    ipc_send_event_raw("workspace", I3_IPC_EVENT_WORKSPACE, (const char *)payload, length);
 
     y(free);
 }
@@ -1668,7 +1694,7 @@ void ipc_send_window_event(const char *property, Con *con) {
     ylength length;
     y(get_buf, &payload, &length);
 
-    ipc_send_event("window", I3_IPC_EVENT_WINDOW, (const char *)payload);
+    ipc_send_event_raw("window", I3_IPC_EVENT_WINDOW, (const char *)payload, length);
     y(free);
     setlocale(LC_NUMERIC, "");
 }
@@ -1687,7 +1713,7 @@ void ipc_send_barconfig_update_event(Barconfig *barconfig) {
     ylength length;
     y(get_buf, &payload, &length);
 
-    ipc_send_event("barconfig_update", I3_IPC_EVENT_BARCONFIG_UPDATE, (const char *)payload);
+    ipc_send_event_raw("barconfig_update", I3_IPC_EVENT_BARCONFIG_UPDATE, (const char *)payload, length);
     y(free);
     setlocale(LC_NUMERIC, "");
 }
@@ -1723,7 +1749,7 @@ void ipc_send_binding_event(const char *event_type, Binding *bind, const char *m
     ylength length;
     y(get_buf, &payload, &length);
 
-    ipc_send_event("binding", I3_IPC_EVENT_BINDING, (const char *)payload);
+    ipc_send_event_raw("binding", I3_IPC_EVENT_BINDING, (const char *)payload, length);
 
     y(free);
     setlocale(LC_NUMERIC, "");
@@ -1735,7 +1761,7 @@ void ipc_send_binding_event(const char *event_type, Binding *bind, const char *m
 void ipc_confirm_restart(ipc_client *client) {
     DLOG("ipc_confirm_restart(fd %d)\n", client->fd);
     static const char *reply = "[{\"success\":true}]";
-    ipc_send_client_message(
+    ipc_send_client_message_raw(
         client, strlen(reply), I3_IPC_REPLY_TYPE_COMMAND,
         (const uint8_t *)reply);
     ipc_push_pending(client);

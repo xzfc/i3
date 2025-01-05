@@ -12,6 +12,7 @@
 #include <config.h>
 
 #include <ev.h>
+#include <json-c/json_object.h>
 #include <yajl/yajl_gen.h>
 #include <yajl/yajl_parse.h>
 
@@ -85,7 +86,15 @@ ipc_client *ipc_new_client_on_fd(EV_P_ int fd);
  * and subscribed to this kind of event.
  *
  */
-void ipc_send_event(const char *event, uint32_t message_type, const char *payload);
+void ipc_send_event_raw(const char *event, uint32_t message_type, const char *payload, size_t size);
+
+/*
+ * Sends the specified event to all IPC clients which are currently connected
+ * and subscribed to this kind of event.
+ *
+ * Takes ownership of the json_object.
+ */
+void ipc_send_event(const char *event, uint32_t message_type, json_object *obj);
 
 /**
  * Calls to ipc_shutdown() should provide a reason for the shutdown.
