@@ -743,29 +743,27 @@ void dump_node(yajl_gen gen, struct Con *con, bool inplace_restart) {
     y(map_close);
 }
 
-static void dump_bar_bindings(yajl_gen gen, Barconfig *config) {
+static json_object *dump_bar_bindings(Barconfig *config) {
     if (TAILQ_EMPTY(&(config->bar_bindings))) {
-        return;
+        return NULL;
     }
 
-    ystr("bindings");
-    y(array_open);
+    json_object *bindings = json_object_new_array();
 
     struct Barbinding *current;
     TAILQ_FOREACH (current, &(config->bar_bindings), bindings) {
-        y(map_open);
+        json_object *binding = json_object_new_object();
+        json_object_array_add(bindings, binding);
 
-        ystr("input_code");
-        y(integer, current->input_code);
-        ystr("command");
-        ystr(current->command);
-        ystr("release");
-        y(bool, current->release == B_UPON_KEYRELEASE);
-
-        y(map_close);
+        json_object_object_add(binding, "input_code",
+                               json_object_new_int64(current->input_code));
+        json_object_object_add(binding, "command",
+                               json_object_new_string(current->command));
+        json_object_object_add(binding, "release",
+                               json_object_new_boolean(current->release == B_UPON_KEYRELEASE));
     }
 
-    y(array_close);
+    return bindings;
 }
 
 static char *canonicalize_output_name(char *name) {
@@ -777,132 +775,113 @@ static char *canonicalize_output_name(char *name) {
     return output ? output_primary_name(output) : name;
 }
 
-static void dump_bar_config(yajl_gen gen, Barconfig *config) {
-    y(map_open);
-
-    ystr("id");
-    ystr(config->id);
+static json_object *dump_bar_config(Barconfig *config) {
+    json_object *obj = json_object_new_object();
+    json_object_object_add(obj, "id", json_object_new_string(config->id));
 
     if (config->num_outputs > 0) {
-        ystr("outputs");
-        y(array_open);
+        json_object *outputs = json_object_new_array();
+        json_object_object_add(obj, "outputs", outputs);
         for (int c = 0; c < config->num_outputs; c++) {
             /* Convert monitor names (RandR ≥ 1.5) or output names
              * (RandR < 1.5) into monitor names. This way, existing
              * configs which use output names transparently keep
              * working. */
-            ystr(canonicalize_output_name(config->outputs[c]));
+            json_object_array_add(outputs,
+                                  json_object_new_string(canonicalize_output_name(config->outputs[c])));
         }
-        y(array_close);
     }
 
     if (!TAILQ_EMPTY(&(config->tray_outputs))) {
-        ystr("tray_outputs");
-        y(array_open);
+        json_object *tray_outputs = json_object_new_array();
+        json_object_object_add(obj, "tray_outputs", tray_outputs);
 
         struct tray_output_t *tray_output;
         TAILQ_FOREACH (tray_output, &(config->tray_outputs), tray_outputs) {
-            ystr(canonicalize_output_name(tray_output->output));
+            json_object_array_add(tray_outputs,
+                                  json_object_new_string(canonicalize_output_name(tray_output->output)));
         }
-
-        y(array_close);
     }
 
-#define YSTR_IF_SET(name)       \
-    do {                        \
-        if (config->name) {     \
-            ystr(#name);        \
-            ystr(config->name); \
-        }                       \
+#define YSTR_IF_SET(name)                              \
+    do {                                               \
+        if (config->name) {                            \
+            json_object_object_add(                    \
+                obj, #name,                            \
+                json_object_new_string(config->name)); \
+        }                                              \
     } while (0)
 
-    ystr("tray_padding");
-    y(integer, config->tray_padding);
+    json_object_object_add(obj, "tray_padding",
+                           json_object_new_int64(config->tray_padding));
 
     YSTR_IF_SET(socket_path);
 
-    ystr("mode");
-    switch (config->mode) {
-        case M_HIDE:
-            ystr("hide");
-            break;
-        case M_INVISIBLE:
-            ystr("invisible");
-            break;
-        case M_DOCK:
-        default:
-            ystr("dock");
-            break;
+    static const char *MODE_NAMES[] = {
+        [M_HIDE] = "hide",
+        [M_INVISIBLE] = "invisible",
+        [M_DOCK] = "dock",
+    };
+    json_object_object_add(obj, "mode", json_object_new_string(MODE_NAMES[config->mode]));
+
+    static const char *HIDDEN_STATE_NAMES[] = {
+        [S_HIDE] = "hide",
+        [S_SHOW] = "show",
+    };
+    json_object_object_add(obj, "hidden_state",
+                           json_object_new_string(HIDDEN_STATE_NAMES[config->hidden_state]));
+
+    json_object_object_add(obj, "modifier", json_object_new_int64(config->modifier));
+
+    json_object *bindings = dump_bar_bindings(config);
+    if (bindings) {
+        json_object_object_add(obj, "bindings", bindings);
     }
 
-    ystr("hidden_state");
-    switch (config->hidden_state) {
-        case S_SHOW:
-            ystr("show");
-            break;
-        case S_HIDE:
-        default:
-            ystr("hide");
-            break;
-    }
-
-    ystr("modifier");
-    y(integer, config->modifier);
-
-    dump_bar_bindings(gen, config);
-
-    ystr("position");
-    if (config->position == P_BOTTOM) {
-        ystr("bottom");
-    } else {
-        ystr("top");
-    }
+    static const char *POSITION_NAMES[] = {
+        [P_BOTTOM] = "bottom",
+        [P_TOP] = "top",
+    };
+    json_object_object_add(obj, "position",
+                           json_object_new_string(POSITION_NAMES[config->position]));
 
     YSTR_IF_SET(status_command);
     YSTR_IF_SET(workspace_command);
     YSTR_IF_SET(font);
 
     if (config->bar_height) {
-        ystr("bar_height");
-        y(integer, config->bar_height);
+        json_object_object_add(obj, "bar_height",
+                               json_object_new_int64(config->bar_height));
     }
 
-    dump_rect_yajl(gen, "padding", config->padding);
+    json_object_object_add(obj, "padding", dump_rect(config->padding));
 
-    if (config->separator_symbol) {
-        ystr("separator_symbol");
-        ystr(config->separator_symbol);
-    }
+    YSTR_IF_SET(separator_symbol);
 
-    ystr("workspace_buttons");
-    y(bool, !config->hide_workspace_buttons);
-
-    ystr("workspace_min_width");
-    y(integer, config->workspace_min_width);
-
-    ystr("strip_workspace_numbers");
-    y(bool, config->strip_workspace_numbers);
-
-    ystr("strip_workspace_name");
-    y(bool, config->strip_workspace_name);
-
-    ystr("binding_mode_indicator");
-    y(bool, !config->hide_binding_mode_indicator);
-
-    ystr("verbose");
-    y(bool, config->verbose);
+    json_object_object_add(obj, "workspace_buttons",
+                           json_object_new_boolean(!config->hide_workspace_buttons));
+    json_object_object_add(obj, "workspace_min_width",
+                           json_object_new_int64(config->workspace_min_width));
+    json_object_object_add(obj, "strip_workspace_numbers",
+                           json_object_new_boolean(config->strip_workspace_numbers));
+    json_object_object_add(obj, "strip_workspace_name",
+                           json_object_new_boolean(config->strip_workspace_name));
+    json_object_object_add(obj, "binding_mode_indicator",
+                           json_object_new_boolean(!config->hide_binding_mode_indicator));
+    json_object_object_add(obj, "verbose", json_object_new_boolean(config->verbose));
 
 #undef YSTR_IF_SET
-#define YSTR_IF_SET(name)              \
-    do {                               \
-        if (config->colors.name) {     \
-            ystr(#name);               \
-            ystr(config->colors.name); \
-        }                              \
+#define YSTR_IF_SET(name)                                     \
+    do {                                                      \
+        if (config->colors.name) {                            \
+            json_object_object_add(                           \
+                colors, #name,                                \
+                json_object_new_string(config->colors.name)); \
+        }                                                     \
     } while (0)
 
-    ystr("colors");
-    y(map_open);
+    json_object *colors = json_object_new_object();
+    json_object_object_add(obj, "colors", colors);
     YSTR_IF_SET(background);
     YSTR_IF_SET(statusline);
     YSTR_IF_SET(separator);
@@ -924,10 +903,9 @@ static void dump_bar_config(yajl_gen gen, Barconfig *config) {
     YSTR_IF_SET(binding_mode_border);
     YSTR_IF_SET(binding_mode_bg);
     YSTR_IF_SET(binding_mode_text);
-    y(map_close);
 
-    y(map_close);
 #undef YSTR_IF_SET
+    return obj;
 }
 
 IPC_HANDLER(tree) {
@@ -1060,23 +1038,16 @@ IPC_HANDLER(get_version) {
  *
  */
 IPC_HANDLER(get_bar_config) {
-    yajl_gen gen = ygenalloc();
-
     /* If no ID was passed, we return a JSON array with all IDs */
     if (message_size == 0) {
-        y(array_open);
+        json_object *obj = json_object_new_array();
+
         Barconfig *current;
         TAILQ_FOREACH (current, &barconfigs, configs) {
-            ystr(current->id);
+            json_object_array_add(obj, json_object_new_string(current->id));
         }
-        y(array_close);
 
-        const unsigned char *payload;
-        ylength length;
-        y(get_buf, &payload, &length);
-
-        ipc_send_client_message_raw(client, length, I3_IPC_REPLY_TYPE_BAR_CONFIG, payload);
-        y(free);
+        ipc_send_client_message(client, I3_IPC_REPLY_TYPE_BAR_CONFIG, obj);
         return;
     }
 
@@ -1096,25 +1067,17 @@ IPC_HANDLER(get_bar_config) {
     }
     free(bar_id);
 
+    json_object *obj;
     if (!config) {
         /* If we did not find a config for the given ID, the reply will contain
          * a null 'id' field. */
-        y(map_open);
-
-        ystr("id");
-        y(null);
-
-        y(map_close);
+        obj = json_object_new_object();
+        json_object_object_add(obj, "id", NULL);
     } else {
-        dump_bar_config(gen, config);
+        obj = dump_bar_config(config);
     }
 
-    const unsigned char *payload;
-    ylength length;
-    y(get_buf, &payload, &length);
-
-    ipc_send_client_message_raw(client, length, I3_IPC_REPLY_TYPE_BAR_CONFIG, payload);
-    y(free);
+    ipc_send_client_message(client, I3_IPC_REPLY_TYPE_BAR_CONFIG, obj);
 }
 
 /*
@@ -1569,18 +1532,8 @@ void ipc_send_window_event(const char *property, Con *con) {
  */
 void ipc_send_barconfig_update_event(Barconfig *barconfig) {
     DLOG("Issue barconfig_update event for id = %s\n", barconfig->id);
-    setlocale(LC_NUMERIC, "C");
-    yajl_gen gen = ygenalloc();
-
-    dump_bar_config(gen, barconfig);
-
-    const unsigned char *payload;
-    ylength length;
-    y(get_buf, &payload, &length);
-
-    ipc_send_event_raw("barconfig_update", I3_IPC_EVENT_BARCONFIG_UPDATE, (const char *)payload, length);
-    y(free);
-    setlocale(LC_NUMERIC, "");
+    ipc_send_event("barconfig_update", I3_IPC_EVENT_BARCONFIG_UPDATE,
+                   dump_bar_config(barconfig));
 }
 
 /*
