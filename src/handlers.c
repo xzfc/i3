@@ -473,8 +473,9 @@ static void handle_screen_change(xcb_generic_event_t *e) {
 
     scratchpad_fix_resolution();
 
-    const char *payload = "{\"change\":\"unspecified\"}";
-    ipc_send_event_raw("output", I3_IPC_EVENT_OUTPUT, payload, strlen(payload));
+    json_object *obj = json_object_new_object();
+    json_object_object_add(obj, "change", json_object_new_string("unspecified"));
+    ipc_send_event("output", I3_IPC_EVENT_OUTPUT, obj);
 }
 
 /*
@@ -1197,8 +1198,9 @@ static void handle_configure_notify(xcb_configure_notify_event_t *event) {
     }
     randr_query_outputs();
 
-    const char *payload = "{\"change\":\"unspecified\"}";
-    ipc_send_event_raw("output", I3_IPC_EVENT_OUTPUT, payload, strlen(payload));
+    json_object *obj = json_object_new_object();
+    json_object_object_add(obj, "change", json_object_new_string("unspecified"));
+    ipc_send_event("output", I3_IPC_EVENT_OUTPUT, obj);
 }
 
 /*

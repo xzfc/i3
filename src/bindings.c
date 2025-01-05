@@ -662,12 +662,10 @@ void switch_mode(const char *new_mode) {
             }
         }
 
-        char *event_msg;
-        sasprintf(&event_msg, "{\"change\":\"%s\", \"pango_markup\":%s}",
-                  mode->name, (mode->pango_markup ? "true" : "false"));
-
-        ipc_send_event_raw("mode", I3_IPC_EVENT_MODE, event_msg, strlen(event_msg));
-        FREE(event_msg);
+        json_object *obj = json_object_new_object();
+        json_object_object_add(obj, "change", json_object_new_string(mode->name));
+        json_object_object_add(obj, "pango_markup", json_object_new_boolean(mode->pango_markup));
+        ipc_send_event("mode", I3_IPC_EVENT_MODE, obj);
 
         return;
     }

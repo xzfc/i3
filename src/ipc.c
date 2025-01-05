@@ -186,26 +186,15 @@ void ipc_send_event(const char *event, uint32_t message_type, json_object *obj) 
  * For shutdown events, we send the reason for the shutdown.
  */
 static void ipc_send_shutdown_event(shutdown_reason_t reason) {
-    yajl_gen gen = ygenalloc();
-    y(map_open);
-
-    ystr("change");
+    json_object *obj = json_object_new_object();
 
     if (reason == SHUTDOWN_REASON_RESTART) {
-        ystr("restart");
+        json_object_object_add(obj, "change", json_object_new_string("restart"));
     } else if (reason == SHUTDOWN_REASON_EXIT) {
-        ystr("exit");
+        json_object_object_add(obj, "change", json_object_new_string("exit"));
     }
 
-    y(map_close);
-
-    const unsigned char *payload;
-    ylength length;
-
-    y(get_buf, &payload, &length);
-    ipc_send_event_raw("shutdown", I3_IPC_EVENT_SHUTDOWN, (const char *)payload, length);
-
-    y(free);
+    ipc_send_event("shutdown", I3_IPC_EVENT_SHUTDOWN, obj);
 }
 
 /*
@@ -1093,25 +1082,17 @@ IPC_HANDLER(get_outputs) {
  *
  */
 IPC_HANDLER(get_marks) {
-    yajl_gen gen = ygenalloc();
-    y(array_open);
+    json_object *obj = json_object_new_array();
 
     Con *con;
     TAILQ_FOREACH (con, &all_cons, all_cons) {
         mark_t *mark;
         TAILQ_FOREACH (mark, &(con->marks_head), marks) {
-            ystr(mark->name);
+            json_object_array_add(obj, json_object_new_string(mark->name));
         }
     }
 
-    y(array_close);
-
-    const unsigned char *payload;
-    ylength length;
-    y(get_buf, &payload, &length);
-
-    ipc_send_client_message_raw(client, length, I3_IPC_REPLY_TYPE_MARKS, payload);
-    y(free);
+    ipc_send_client_message(client, I3_IPC_REPLY_TYPE_MARKS, obj);
 }
 
 /*
@@ -1119,43 +1100,25 @@ IPC_HANDLER(get_marks) {
  *
  */
 IPC_HANDLER(get_version) {
-    yajl_gen gen = ygenalloc();
-    y(map_open);
+    json_object *obj = json_object_new_object();
+    json_object_object_add(obj, "major", json_object_new_int(MAJOR_VERSION));
+    json_object_object_add(obj, "minor", json_object_new_int(MINOR_VERSION));
+    json_object_object_add(obj, "patch", json_object_new_int(PATCH_VERSION));
+    json_object_object_add(obj, "human_readable", json_object_new_string(i3_version));
+    json_object_object_add(obj, "loaded_config_file_name", json_object_new_string(current_configpath));
 
-    ystr("major");
-    y(integer, MAJOR_VERSION);
-
-    ystr("minor");
-    y(integer, MINOR_VERSION);
-
-    ystr("patch");
-    y(integer, PATCH_VERSION);
-
-    ystr("human_readable");
-    ystr(i3_version);
-
-    ystr("loaded_config_file_name");
-    ystr(current_configpath);
-
-    ystr("included_config_file_names");
-    y(array_open);
+    json_object *fnames = json_object_new_array();
+    json_object_object_add(obj, "included_config_file_names", fnames);
     IncludedFile *file;
     TAILQ_FOREACH (file, &included_files, files) {
         if (file == TAILQ_FIRST(&included_files)) {
             /* Skip the first file, which is current_configpath. */
             continue;
         }
-        ystr(file->path);
+        json_object_array_add(fnames, json_object_new_string(file->path));
     }
-    y(array_close);
-    y(map_close);
 
-    const unsigned char *payload;
-    ylength length;
-    y(get_buf, &payload, &length);
-
-    ipc_send_client_message_raw(client, length, I3_IPC_REPLY_TYPE_VERSION, payload);
-    y(free);
+    ipc_send_client_message(client, I3_IPC_REPLY_TYPE_VERSION, obj);
 }
 
 /*
@@ -1226,21 +1189,12 @@ IPC_HANDLER(get_bar_config) {
  *
  */
 IPC_HANDLER(get_binding_modes) {
-    yajl_gen gen = ygenalloc();
-
-    y(array_open);
+    json_object *obj = json_object_new_array();
     struct Mode *mode;
     SLIST_FOREACH (mode, &modes, modes) {
-        ystr(mode->name);
+        json_object_array_add(obj, json_object_new_string(mode->name));
     }
-    y(array_close);
-
-    const unsigned char *payload;
-    ylength length;
-    y(get_buf, &payload, &length);
-
-    ipc_send_client_message_raw(client, length, I3_IPC_REPLY_TYPE_BINDING_MODES, payload);
-    y(free);
+    ipc_send_client_message(client, I3_IPC_REPLY_TYPE_BINDING_MODES, obj);
 }
 
 /*
@@ -1316,44 +1270,36 @@ IPC_HANDLER(subscribe) {
     }
 
     client->first_tick_sent = true;
-    const char *payload = "{\"first\":true,\"payload\":\"\"}";
-    ipc_send_client_message_raw(client, strlen(payload), I3_IPC_EVENT_TICK, (const uint8_t *)payload);
+    json_object *obj = json_object_new_object();
+    json_object_object_add(obj, "first", json_object_new_boolean(true));
+    json_object_object_add(obj, "payload", json_object_new_string(""));
+    ipc_send_client_message(client, I3_IPC_EVENT_TICK, obj);
 }
 
 /*
  * Returns the raw last loaded i3 configuration file contents.
  */
 IPC_HANDLER(get_config) {
-    yajl_gen gen = ygenalloc();
+    json_object *obj = json_object_new_object();
 
-    y(map_open);
-
-    ystr("config");
     IncludedFile *file = TAILQ_FIRST(&included_files);
-    ystr(file->raw_contents);
+    json_object_object_add(obj, "config",
+                           json_object_new_string(file->raw_contents));
 
-    ystr("included_configs");
-    y(array_open);
+    json_object *included_configs = json_object_new_array();
+    json_object_object_add(obj, "included_configs", included_configs);
     TAILQ_FOREACH (file, &included_files, files) {
-        y(map_open);
-        ystr("path");
-        ystr(file->path);
-        ystr("raw_contents");
-        ystr(file->raw_contents);
-        ystr("variable_replaced_contents");
-        ystr(file->variable_replaced_contents);
-        y(map_close);
+        json_object *config_obj = json_object_new_object();
+        json_object_array_add(included_configs, config_obj);
+        json_object_object_add(config_obj, "path",
+                               json_object_new_string(file->path));
+        json_object_object_add(config_obj, "raw_contents",
+                               json_object_new_string(file->raw_contents));
+        json_object_object_add(config_obj, "variable_replaced_contents",
+                               json_object_new_string(file->variable_replaced_contents));
     }
-    y(array_close);
 
-    y(map_close);
-
-    const unsigned char *payload;
-    ylength length;
-    y(get_buf, &payload, &length);
-
-    ipc_send_client_message_raw(client, length, I3_IPC_REPLY_TYPE_CONFIG, payload);
-    y(free);
+    ipc_send_client_message(client, I3_IPC_REPLY_TYPE_CONFIG, obj);
 }
 
 /*
@@ -1361,24 +1307,12 @@ IPC_HANDLER(get_config) {
  * synchronization point in event-related tests.
  */
 IPC_HANDLER(send_tick) {
-    yajl_gen gen = ygenalloc();
-
-    y(map_open);
-
-    ystr("first");
-    y(bool, false);
-
-    ystr("payload");
-    yajl_gen_string(gen, (unsigned char *)message, message_size);
-
-    y(map_close);
-
-    const unsigned char *payload;
-    ylength length;
-    y(get_buf, &payload, &length);
-
-    ipc_send_event_raw("tick", I3_IPC_EVENT_TICK, (const char *)payload, length);
-    y(free);
+    json_object *obj = json_object_new_object();
+    json_object_object_add(obj, "first",
+                           json_object_new_boolean(false));
+    json_object_object_add(obj, "payload",
+                           json_object_new_string_len((const char *)message, message_size));
+    ipc_send_event("tick", I3_IPC_EVENT_TICK, obj);
 
     ipc_send_client_message(client, I3_IPC_REPLY_TYPE_TICK, dump_success(true));
     DLOG("Sent tick event\n");
@@ -1442,21 +1376,9 @@ IPC_HANDLER(sync) {
 }
 
 IPC_HANDLER(get_binding_state) {
-    yajl_gen gen = ygenalloc();
-
-    y(map_open);
-
-    ystr("name");
-    ystr(current_binding_mode);
-
-    y(map_close);
-
-    const unsigned char *payload;
-    ylength length;
-    y(get_buf, &payload, &length);
-
-    ipc_send_client_message_raw(client, length, I3_IPC_REPLY_TYPE_GET_BINDING_STATE, payload);
-    y(free);
+    json_object *obj = json_object_new_object();
+    json_object_object_add(obj, "name", json_object_new_string(current_binding_mode));
+    ipc_send_client_message(client, I3_IPC_REPLY_TYPE_GET_BINDING_STATE, obj);
 }
 
 /* The index of each callback function corresponds to the numeric
